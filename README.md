@@ -1,45 +1,44 @@
 # enable-3fg-drag
 
-Enable native, macOS-style three-finger drag on Wayland compositors (GNOME Shell, KWin) using libinput's built-in engine.
+Enable native, macOS-style three-finger dragging on Wayland compositors (GNOME Shell, KWin) via `libinput`.
+
+---
+
+## Why Native Driver Drag Over Shell Extensions
+
+Most attempts to implement three-finger drag on Linux rely on desktop extensions (such as GNOME Shell extensions). While functional for basic window moving, extension-based implementations suffer from architectural limitations:
+
+| Feature | Shell Extension Approach | Patched libinput | **enable-3fg-drag (Shim)** |
+| :--- | :---: | :---: | :---: |
+| **Overview & Modal Grab Support** | ❌ Blocked by Mutter modal grab | ✔ Works everywhere | **✔ Works everywhere** |
+| **System Update Stability** | ❌ Breaks on DE updates | ❌ Overwritten by package manager | **✔ Survives OS/DE updates** |
+| **Cross-Desktop Compatibility** | ❌ GNOME Shell only | ✔ Any compositor | **✔ GNOME, KDE Plasma, etc.** |
+| **Input Thread Performance** | ❌ Main UI thread (JS) | ✔ Input thread (C) | **✔ Input thread (C)** |
+| **Maintenance Overhead** | ⚠️ High (adapting JS APIs) | ⚠️ High (recompiling each update) | **✔ Zero (stable C ABI)** |
+
+### The Modal Grab Problem in Wayland
+
+When entering the GNOME Overview or opening a modal dialog, the compositor activates a modal grab (`Main.pushModal`). This grab explicitly locks input routing to the physical hardware seat device.
+
+Shell extensions synthesize clicks using secondary virtual pointer devices (`MetaVirtualInputDevice`). Because these secondary devices are not the grab's target, **Mutter silently discards their button events inside the Overview**. This makes dragging application icons or interacting with Overview elements impossible via extensions.
+
+`enable-3fg-drag` bypasses the compositor entirely by activating `libinput`'s built-in drag engine (`libinput_device_config_3fg_drag_set_enabled`). Clicks and motion are synthesized at the driver level, emitting real hardware events from your physical touchpad that pass through all modal grabs.
 
 ---
 
 ## Highlights
 
-- **Works in Overview & Modal Grabs:** Synthesizes hardware pointer events directly inside `libinput`. Unlike Shell extensions, it cannot be blocked by Mutter's modal grab filter.
-- **Zero Package Breakage:** Standalone `LD_PRELOAD` shim. Survives distro upgrades, kernel updates, and GNOME Shell releases.
-- **Fast Swipes Preserved:** A fast 3-finger flick still acts as a swipe gesture (libinput ≥ 1.31).
-- **No Build Dependencies:** Zero external headers needed. Compiles cleanly with standard `cc` / `gcc` / `clang`.
-
----
-
-## Why This Exists
-
-`libinput` has shipped full native three-finger dragging since **v1.28** (`libinput_device_config_3fg_drag_set_enabled`), handling finger tracking, button holds, pointer motion, and palm rejection in C.
-
-However, neither GNOME Shell nor KDE Plasma expose a toggle to turn it on. GNOME extensions attempt to emulate this via virtual pointer devices, but Mutter completely drops secondary virtual pointer clicks inside the Overview (modal grab).
-
-This shim hooks `libinput_get_event()` to automatically flip the native driver switch whenever a touchpad is detected.
-
----
-
-## Comparison
-
-| Feature | GNOME Extension | Patched libinput | **enable-3fg-drag** |
-| :--- | :---: | :---: | :---: |
-| **Desktop Windows & Text Drag** | Yes | Yes | **Yes** |
-| **Overview App Icon Reordering** | No (blocked by grab) | Yes | **Yes** |
-| **Survives OS / GNOME Updates** | Often breaks yearly | Overwritten on update | **Yes (stable ABI)** |
-| **System Modification** | Extension directory | Replaced binary | **Single `.so` file** |
+- **Native Driver Integration:** Leverages the native 3-finger drag engine merged into `libinput` ≥ 1.28.
+- **Fast-Swipe Aware:** Fast flick gestures continue to register as swipe events (libinput ≥ 1.31).
+- **Self-Contained:** Written in minimal C. Compiles with standard tools without requiring `libinput-devel` headers.
 
 ---
 
 ## Requirements
 
-- Linux with Wayland session
-- `libinput` ≥ 1.28
+- Wayland session powered by `libinput` ≥ 1.28
 - C compiler (`cc`, `gcc`, or `clang`) and `make`
-- `sudo` access (for `/usr/lib/` and `/etc/ld.so.preload`)
+- Root access (for `/usr/lib/` and `/etc/ld.so.preload`)
 
 ---
 
@@ -51,30 +50,29 @@ cd enable-3fg-drag
 ./install.sh
 ```
 
-Log out and log back in to reload your Wayland compositor session.
+Log out and log back in to reload your Wayland session.
 
 ### Verify Activation
 
-Check user journal logs after logging in:
+Check the system journal after logging in:
 
 ```bash
 journalctl --user -b | grep enable-3fg-drag
 ```
 
-Expected output:
+Expected log:
 ```text
 [enable-3fg-drag] enabled 3-finger drag on "ELAN0718:00 04F3:30FD Touchpad": Success
 ```
 
 ---
 
-## Behavior & Tips
+## Behavior & Usage
 
-- **Instant Drop (Bypassing Delay):**
-  `libinput` includes an internal ~300ms release delay so you can lift and reposition your fingers across trackpad edges without dropping.
-  *To drop immediately without waiting, tap 1 or 2 fingers on the trackpad right after lifting.*
-- **Retain 4-Finger Workspace Navigation (GNOME):**
-  Keep the [swap-finger-gestures-3-4](https://extensions.gnome.org/extension/6049/swap-finger-gestures-3-4/) extension enabled to remap GNOME's workspace switching and Overview gestures to 4 fingers, preventing gesture collisions with 3-finger drag.
+- **Tap to Drop Instantly:**
+  `libinput` implements an internal ~300ms release delay allowing fingers to lift and reposition without prematurely dropping items. To release the drag immediately, tap 1 or 2 fingers on the trackpad.
+- **GNOME 4-Finger Navigation:**
+  On GNOME Shell, install [swap-finger-gestures-3-4](https://extensions.gnome.org/extension/6049/swap-finger-gestures-3-4/) so desktop switching and Overview toggles use 4 fingers, reserving 3 fingers exclusively for dragging.
 
 ---
 
@@ -84,7 +82,7 @@ Expected output:
 ./uninstall.sh
 ```
 
-Log out and log back in to fully unload the library from the session.
+Log out and log back in to fully revert.
 
 ---
 
