@@ -1,34 +1,82 @@
 # enable-3fg-drag
 
-Enable native, macOS-style three-finger dragging on Wayland compositors (GNOME Shell, KWin) using `libinput` (>= 1.28).
+Enable native, macOS-style three-finger drag on Wayland compositors (GNOME Shell, KWin) using libinput's built-in engine.
 
-## Overview
+---
 
-`libinput` natively supports three-finger dragging (`libinput_device_config_3fg_drag_set_enabled`), emitting real hardware button clicks and motion events that work inside desktop windows and Overview modal grabs. However, desktop environments currently leave this feature disabled by default with no user-facing toggle.
+## Highlights
 
-This project provides a lightweight `LD_PRELOAD` C shim (`libenable-3fg-drag.so`) that intercepts `libinput_get_event` and automatically enables three-finger drag on any attached touchpad supporting >= 3 fingers.
+- **Works in Overview & Modal Grabs:** Synthesizes hardware pointer events directly inside `libinput`. Unlike Shell extensions, it cannot be blocked by Mutter's modal grab filter.
+- **Zero Package Breakage:** Standalone `LD_PRELOAD` shim. Survives distro upgrades, kernel updates, and GNOME Shell releases.
+- **Fast Swipes Preserved:** A fast 3-finger flick still acts as a swipe gesture (libinput ≥ 1.31).
+- **No Build Dependencies:** Zero external headers needed. Compiles cleanly with standard `cc` / `gcc` / `clang`.
+
+---
+
+## Why This Exists
+
+`libinput` has shipped full native three-finger dragging since **v1.28** (`libinput_device_config_3fg_drag_set_enabled`), handling finger tracking, button holds, pointer motion, and palm rejection in C.
+
+However, neither GNOME Shell nor KDE Plasma expose a toggle to turn it on. GNOME extensions attempt to emulate this via virtual pointer devices, but Mutter completely drops secondary virtual pointer clicks inside the Overview (modal grab).
+
+This shim hooks `libinput_get_event()` to automatically flip the native driver switch whenever a touchpad is detected.
+
+---
+
+## Comparison
+
+| Feature | GNOME Extension | Patched libinput | **enable-3fg-drag** |
+| :--- | :---: | :---: | :---: |
+| **Desktop Windows & Text Drag** | Yes | Yes | **Yes** |
+| **Overview App Icon Reordering** | No (blocked by grab) | Yes | **Yes** |
+| **Survives OS / GNOME Updates** | Often breaks yearly | Overwritten on update | **Yes (stable ABI)** |
+| **System Modification** | Extension directory | Replaced binary | **Single `.so` file** |
+
+---
 
 ## Requirements
 
-- Wayland session with `libinput` >= 1.28
+- Linux with Wayland session
+- `libinput` ≥ 1.28
 - C compiler (`cc`, `gcc`, or `clang`) and `make`
-- Root access (for `/usr/lib/` and `/etc/ld.so.preload`)
+- `sudo` access (for `/usr/lib/` and `/etc/ld.so.preload`)
+
+---
 
 ## Installation
 
 ```bash
-git clone https://github.com/<your-username>/enable-3fg-drag.git
+git clone https://github.com/cobaltty/enable-3fg-drag.git
 cd enable-3fg-drag
 ./install.sh
 ```
 
-Log out and log back in to reload your Wayland compositor.
+Log out and log back in to reload your Wayland compositor session.
 
-Verify in journal logs:
+### Verify Activation
+
+Check user journal logs after logging in:
+
 ```bash
 journalctl --user -b | grep enable-3fg-drag
-# -> [enable-3fg-drag] enabled 3-finger drag on "<touchpad>": Success
 ```
+
+Expected output:
+```text
+[enable-3fg-drag] enabled 3-finger drag on "ELAN0718:00 04F3:30FD Touchpad": Success
+```
+
+---
+
+## Behavior & Tips
+
+- **Instant Drop (Bypassing Delay):**
+  `libinput` includes an internal ~300ms release delay so you can lift and reposition your fingers across trackpad edges without dropping.
+  *To drop immediately without waiting, tap 1 or 2 fingers on the trackpad right after lifting.*
+- **Retain 4-Finger Workspace Navigation (GNOME):**
+  Keep the [swap-finger-gestures-3-4](https://extensions.gnome.org/extension/6049/swap-finger-gestures-3-4/) extension enabled to remap GNOME's workspace switching and Overview gestures to 4 fingers, preventing gesture collisions with 3-finger drag.
+
+---
 
 ## Uninstallation
 
@@ -36,9 +84,10 @@ journalctl --user -b | grep enable-3fg-drag
 ./uninstall.sh
 ```
 
-Log out and back in to fully unload the shim.
+Log out and log back in to fully unload the library from the session.
 
-## Usage Notes
+---
 
-- **Tap to drop instantly:** `libinput` includes an internal ~300ms drag release delay so you can reposition your fingers without losing the drag. To cancel the drag immediately without waiting, tap 1 or 2 fingers on the trackpad.
-- **GNOME 4-finger gestures:** Keep the `swap-finger-gestures-3-4` GNOME extension enabled so stock workspace/overview swipe gestures use 4 fingers instead of interfering with 3-finger drag.
+## License
+
+MIT
